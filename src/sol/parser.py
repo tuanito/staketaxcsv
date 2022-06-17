@@ -63,10 +63,17 @@ def parse_tx(txid, data, wallet_info):
     txinfo.account_to_mint, txinfo.mints = _mints(data, wallet_address)
 
     txinfo.balance_changes_all, txinfo.balance_changes_wallet = _balance_changes(data, txinfo.wallet_accounts, txinfo.mints)
-    txinfo.transfers = _transfers(txinfo.balance_changes_wallet)
+    print ("parse_tx::Before1 _transfers txinfo.balance_changes_all: \n ----\n", txinfo.balance_changes_all, "\n----\n")
+    print ("parse_tx::Before2 _transfers txinfo.balance_changes_wallet: \n ----\n", txinfo.balance_changes_wallet, "\n----\n")
+    #txinfo.transfers = _transfers(txinfo.balance_changes_wallet)
+    txinfo.transfers = _transfers_new(txinfo.balance_changes_all, txinfo.balance_changes_wallet) # Returns transfers_in and transfers_out
     txinfo.transfers_net, txinfo.fee = _transfers_net(txinfo, txinfo.transfers)
 
-    txinfo.lp_transfers = _transfers_instruction(txinfo, txinfo.inner)
+    #txinfo.lp_transfers = _transfers_instruction(txinfo, txinfo.inner)
+    # Perfect : we have the atomic trade on StSol
+    txinfo.lp_transfers = _transfers_instruction_new(txinfo, txinfo.inner)
+    print ("parse_tx :: txinfo.lp_transfers = ", txinfo.lp_transfers)
+
     txinfo.lp_transfers_net, txinfo.lp_fee = _transfers_net(
         txinfo, txinfo.lp_transfers, mint_to=True)
 
@@ -108,11 +115,31 @@ def _transfers(balance_changes):
     transfers_in = []
     transfers_out = []
 
+    print ("_transfers START : balance_changes= \n", balance_changes)
     for account_address, (currency, amount_change) in balance_changes.items():
         if amount_change > 0:
             transfers_in.append((amount_change, currency, "", account_address))
         elif amount_change < 0:
             transfers_out.append((-amount_change, currency, account_address, ""))
+    print ("_transfers END : transfers_in=\n", transfers_in)
+    print ("_transfers END : transfers_out=\n", transfers_out)
+
+    return transfers_in, transfers_out, []
+
+# This outputs transfers_in and transfers_out, and they are already wrong as for StSOL, they give the 
+# net amount of stSOL
+def _transfers_new (balance_all, balance_changes): 
+    transfers_in = []
+    transfers_out = []
+
+    print ("_transfers_new START : balance_changes= \n", balance_changes)
+    for account_address, (currency, amount_change) in balance_changes.items():
+        if amount_change > 0:
+            transfers_in.append((amount_change, currency, "", account_address))
+        elif amount_change < 0:
+            transfers_out.append((-amount_change, currency, account_address, ""))
+    print ("_transfers_new END : transfers_in=\n", transfers_in)
+    print ("_transfers_new END : transfers_out=\n", transfers_out)
 
     return transfers_in, transfers_out, []
 
@@ -120,6 +147,8 @@ def _transfers(balance_changes):
 def _balance_changes(data, wallet_accounts, mints):
     balance_changes_sol = _balance_changes_sol(data)
     balance_changes_tokens = _balance_changes_tokens(data, mints)
+
+    print ("_balance_changes:: balance_changes_tokens=", balance_changes_tokens)
 
     balance_changes = dict(balance_changes_sol)
     balance_changes.update(dict(balance_changes_tokens))
@@ -401,6 +430,83 @@ def _transfers_instruction(txinfo, instructions):
                     transfers_unknown.append((amount, currency, source, destination))
 
     return transfers_in, transfers_out, transfers_unknown
+
+def _transfers_instruction_new(txinfo, instructions):
+    """ Returns transfers using information from instructions data (alternative method instead of balance changes) """
+    txid = txinfo.txid
+    account_to_mint = txinfo.account_to_mint
+    wallet_accounts = txinfo.wallet_accounts
+    wallet_address = txinfo.wallet_address
+
+    transfers_in = []
+    transfers_out = []
+    transfers_unknown = []
+
+    print ("_transfers_instruction_new : \n", "txinfo = \n", txinfo ,"\n", "instructions : \n", instructions,"\n")
+    for i, instruction in enumerate(instructions):
+        if "parsed" in instruction:
+            parsed = instruction["parsed"]
+            if type(parsed) is dict and parsed.get("type") == "transfer":
+                info = parsed["info"]
+
+                amount_string = info.get("amount", None)
+                lamports = info.get("lamports", None)
+                token_amount = info.get("tokenAmount", None)
+                authority = info.get("authority", None)
+                source = info.get("source", None)
+                destination = info.get("destination", None)
+                print ("--------------------------------\n")
+                print ("_transfers_instruction_new : \n", "amount_string = ", amount_string ,"\n", "token_amount = ", token_amount, "\n", ", authority = ", authority, "\n", "source = ", source, "\n", "destination = ", destination, "\n")
+
+                # self transfer
+                if source and source == destination:
+                    print ( "_transfers_instruction_new : source and source == destination : \n", "source=", source, "\n", "destination=" , destination, "\n, : CONTINUE")
+                    continue
+                if amount_string == "0":
+                    print ( "_transfers_instruction_new : amount_string == 0 CONTINUE")
+                    continue
+
+                # Determine amount
+                if amount_string is not None:
+                    pass
+                elif lamports is not None:
+                    amount_string = lamports
+                elif token_amount is not None:
+                    amount_string = token_amount["amount"]
+
+                # Determine mint
+                if lamports:
+                    mint = MINT_SOL
+                elif source in account_to_mint and account_to_mint[source] != MINT_SOL:
+                    mint = account_to_mint[source]
+                elif destination in account_to_mint and account_to_mint[destination] != MINT_SOL:
+                    mint = account_to_mint[destination]
+                else:
+                    mint = MINT_SOL
+
+                # Determine amount, currency
+                amount, currency = util_sol.amount_currency(txinfo, amount_string, mint)
+                print ( "_transfers_instruction_new : amount = ", amount, ", currency = ",currency)
+
+                # Determine direction of transfer
+                if source in wallet_accounts:
+                    transfers_out.append((amount, currency, wallet_address, destination))
+                    print ( "_transfers_instruction_new : ",i,".1 :  amount = ", amount, ", currency = ",currency, ", wallet_address = ", wallet_address, ", destination = ", destination, ", -->transfers_out")
+                elif authority in wallet_accounts:
+                    transfers_out.append((amount, currency, wallet_address, destination))
+                    print ( "_transfers_instruction_new : ",i,".2 : amount = ", amount, ", currency = ",currency, ", wallet_address = ", wallet_address, ", destination = ", destination, ", -->transfers_out")
+                elif destination in wallet_accounts:
+                    transfers_in.append((amount, currency, source, destination))
+                    print ( "_transfers_instruction_new : ",i,".3 : amount = ", amount, ", currency = ",currency, ", wallet_address = ", wallet_address, ", destination = ", destination, ", -->transfers_in")
+                else:
+                    logging.error("Unable to determine direction for info: %s", info)
+                    print ( "_transfers_instruction_new : ",i,".4 : amount = ", amount, ", currency = ",currency, ", wallet_address = ", wallet_address, ", destination = ", destination, ", -->transfers_out")
+                    print ( "_transfers_instruction_new : UNKNOWN unable to determine direction for info: %s", info)
+                    print ( "_transfers_instruction_new : appending amount=", amount, "currency=", currency, ",source=", source, ", destination=", destination,"\n UNKNOWN unable to determine direction for info: %s", info)
+                    transfers_unknown.append((amount, currency, source, destination))
+
+    return transfers_in, transfers_out, transfers_unknown
+
 
 
 def _extract_mint_to(instructions, wallet_address):
