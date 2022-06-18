@@ -15,6 +15,7 @@ from sol.handle_transfer import is_transfer
 import sol.util_sol
 
 
+# Returns transfers_in, transfers_out, embedded in txinfo. CORRECT
 def parse_tx(txid, data, wallet_info):
     """ Parses data returned by RcpAPI.fetch_tx().  Returns TxInfoSol object """
     wallet_address = wallet_info.wallet_address
@@ -65,17 +66,24 @@ def parse_tx(txid, data, wallet_info):
     txinfo.balance_changes_all, txinfo.balance_changes_wallet = _balance_changes(data, txinfo.wallet_accounts, txinfo.mints)
     print ("parse_tx::Before1 _transfers txinfo.balance_changes_all: \n ----\n", txinfo.balance_changes_all, "\n----\n")
     print ("parse_tx::Before2 _transfers txinfo.balance_changes_wallet: \n ----\n", txinfo.balance_changes_wallet, "\n----\n")
-    #txinfo.transfers = _transfers(txinfo.balance_changes_wallet)
-    txinfo.transfers = _transfers_new(txinfo.balance_changes_all, txinfo.balance_changes_wallet) # Returns transfers_in and transfers_out
-    txinfo.transfers_net, txinfo.fee = _transfers_net(txinfo, txinfo.transfers)
+    # txinfo.transfers = _transfers(txinfo.balance_changes_wallet)
+    # NOT OK : this returns a _transfers_out null
+    # txinfo.transfers are incorrect
+    # txinfo.transfers = _transfers( txinfo.balance_changes_wallet) # Returns transfers_in and transfers_out
+    # txinfo.transfers_net, txinfo.fee = _transfers_net(txinfo, txinfo.transfers)
+
+    txinfo.transfers = _transfers_new(txinfo.balance_changes_wallet) # Returns transfers_in and transfers_out
+    txinfo.transfers_net, txinfo.fee = _transfers_net_new(txinfo, txinfo.transfers, txinfo.balance_changes_all) # Add up one last argument for atomic trades
 
     #txinfo.lp_transfers = _transfers_instruction(txinfo, txinfo.inner)
-    # Perfect : we have the atomic trade on StSol
+    # OK Perfect : we have the atomic trade on stSol
+    # txinfo.lp_transfers are correct
     txinfo.lp_transfers = _transfers_instruction_new(txinfo, txinfo.inner)
     print ("parse_tx :: txinfo.lp_transfers = ", txinfo.lp_transfers)
 
-    txinfo.lp_transfers_net, txinfo.lp_fee = _transfers_net(
-        txinfo, txinfo.lp_transfers, mint_to=True)
+    # txinfo.lp_transfers_net, txinfo.lp_fee = _transfers_net(txinfo, txinfo.lp_transfers, mint_to=True)
+    # TODO
+    txinfo.lp_transfers_net, txinfo.lp_fee = _transfers_net_new(txinfo, txinfo.lp_transfers, txinfo.balance_changes_all, mint_to=True)
 
     # Update wallet_info with any staking addresses found
     addresses = _staking_addresses_found(wallet_address, txinfo.instructions)
@@ -128,7 +136,7 @@ def _transfers(balance_changes):
 
 # This outputs transfers_in and transfers_out, and they are already wrong as for StSOL, they give the 
 # net amount of stSOL
-def _transfers_new (balance_all, balance_changes): 
+def _transfers_new ( balance_changes): 
     transfers_in = []
     transfers_out = []
 
@@ -582,6 +590,123 @@ def _transfers_net(txinfo, transfers, mint_to=False):
 
     return (net_transfers_in, net_transfers_out, transfers_unknown), fee
 
+def _transfers_net_new(txinfo, transfers, balance_changes_all, mint_to=False):
+    """ Combines like currencies and removes fees from transfers lists """
+    transfers_in, transfers_out, transfers_unknown = transfers
+
+    print ("--------\n")
+    print ("_transfers_net_new:: transfers = ", transfers, "\n------")
+    print ("_transfers_net_new:: transfers_in = ", transfers_in, "\n------")
+    print ("_transfers_net_new:: transfers_out = ", transfers_out, "\n------")
+    print ("_transfers_net_new:: transfers_unknown = ", transfers_unknown, "\n------")
+    print ("_transfers_net_new:: balance_changes_all= ", balance_changes_all)
+    # Sum up net transfer by currency, into a dict
+    net_amounts = {}
+    net_transfers_in = []
+    net_transfers_out = []
+
+    # Populate net_amounts map, and ensure unicity of coin in the map 
+    for amount, currency, source, destination in transfers_in:
+        print ("--- \n_transfers_net_new::for loop : transfers_in : testing currency = ", currency, ", amount = ", amount, "\n") 
+        if currency not in net_amounts: # Ensure unicity of coin in map
+            net_amounts[currency] = 0
+        net_amounts[currency] += amount # Ensure unicity of coin in map
+        print ("--- \n_transfers_net_new::for loop : transfers_in : currency = ", currency, ", adding +amount = ", amount, "\n") 
+    for amount, currency, source, destination in transfers_out:
+        print ("--- \n_transfers_net_new::for loop : transfers_out : testing currency = ", currency, ", amount = ", amount, "\n") 
+        if currency not in net_amounts:
+            net_amounts[currency] = 0
+        net_amounts[currency] -= amount
+        print ("--- \n_transfers_net_new::for loop : currency = ", currency, ", substracting -amount = ", -amount, "\n") 
+
+    print ("_transfers_net_new::net_amounts : ", net_amounts, "\n")
+    # print ("_transfers_net_new::net_amounts.dict() : ", net_amounts.dict(), "\n")
+    print ("_transfers_net_new::net_amounts.items() : ", net_amounts.items(), "\n")
+
+    # Case 1 : we have SOL and one pair of currencies, which means this is a regular trade, not an atomic one 
+    if len ( net_amounts.items()) >= 3: 
+        # Convert dict into two lists of transactions, net_transfers_in and net_transfers_out
+        # THIS IS THE PART WHICH is BUGGED for atomic trades : for atomic trades, the balance_changes_wallet gives only one NET value, there is no pair "stSOL/stSOL"... Therefore there is only
+        # one net amount which is the P&L, but the "nominal" of the trade does not show, as the cumulated sum makes it fungible. In that case, we need to hack the code and 
+        # extract the balance_changes_all which has the initial BUY/SELL on stSOL.
+
+        for currency, amount in net_amounts.items():
+            print ("_transfers_net_new:: currency = ", currency,", amount = ", amount, "\n")
+            if amount < 0:
+                source, destination = _get_source_destination_new(currency, False, transfers_in, transfers_out)
+                net_transfers_out.append((-amount, currency, source, destination))
+            elif amount > 0:
+                source, destination = _get_source_destination_new(currency, True, transfers_in, transfers_out)
+                net_transfers_in.append((amount, currency, source, destination))
+            else:
+                continue
+    # Case 2 : we have SOL and one currency only, which means this is an atomic trade 
+    elif len ( net_amounts.items()) <= 2: 
+        # Pseudo code : 
+        # if the net_amount.items() excluding SOL has only element (or including SOL has only 2 elements)
+        # this means we have an atomic trade.
+        # In that case, we should get the net_transfers_in and net_transfers_out from the original balance_changes_all WHERE THE 2 AMOUNTS ARE DIFFERENT FROM the NET AMOUNT
+
+        # Step #1 : look for the currency and the net amount of the atomic trade
+        # Step #2 : look in balance_changes_all which change/line corresponds to the currency AND which are not egal to the net amount
+        # Step #3 : populate net_transfers_out and net_transfers_in accordingly
+
+        # Step #1 : look for the currency and the net amount of the atomic trade
+        # --------
+
+        atomic_currency = ""
+        atomic_net_amount = 0 
+        for currency, amount in net_amounts.items():
+            print ("_transfers_net_new:: Testing for atomic trade : currency = ", currency,", amount = ", amount, "\n")
+            if currency != "SOL" and amount != 0:
+                print ("_transfers_net_new:: Found atomic trade : currency = ", currency,", amount = ", amount, "\n")
+                # We found the atomic trade with its currency : atomic_currency
+                atomic_currency = currency
+                atomic_net_amount = amount
+                break
+
+        # Let's look for the atomic trade
+        transfers_in, transfers_out, transfers_unknown = transfers 
+
+        # Step #2 : look in balance_changes_all which change/line corresponds to the currency AND which are not egal to the net amount
+        # --------
+        for k, v in balance_changes_all.items():
+            source = ""
+            destination = ""
+            print("_transfers_net_new : listing all elements of balance_changes_all :", k, ",", v,"\n")
+            iter_currency, iter_amount = v
+            # Step #3 : populate net_transfers_out and net_transfers_in accordingly
+            # Now populate the net_transfers_out and net_transfers_in like any other pair
+            if iter_currency == atomic_currency and iter_amount != atomic_net_amount: 
+                # print ("_transfers_net_new:: atomic trade found : iter_currency = ", iter_currency,", atomic_net_amount = ", atomic_net_amount,", iter_amount = ", iter_amount, "\n")
+                if iter_amount < 0:
+                    # Warning : signs have been inverted from normal convention : the blockchain seems to invert the signs for atomic trades. TO BE VERIFIED 
+                    transfers_in=[(-iter_amount, iter_currency,'',k)]
+                    # Do not need to use _get_source_destination() anymore, we just "hard code" the source wallet
+                    source = k 
+                    print ("_transfers_net_new:: atomic trade found : iter_currency = ", iter_currency,", transfers_out= ", iter_amount, "\n")
+                elif amount > 0:
+                    # Warning : signs have been inverted from normal convention : the blockchain seems to invert the signs for atomic trades. TO BE VERIFIED 
+                    transfers_out=[(iter_amount, iter_currency,k,'')]
+                    # Do not need to use _get_source_destination() anymore, we just "hard code" the destination wallet
+                    destination = k
+                    print ("_transfers_net_new:: atomic trade found : iter_currency = ", iter_currency,", transfers_in ", iter_amount, "\n")
+                else:
+                    continue
+                # Do not need to use _get_source_destination() anymore, we just "hard code" the wallets
+                net_transfers_in.append((iter_amount, iter_currency, source, destination))
+ 
+
+    # Add any nft "mintTo" instruction as net transfer in (where applicable)
+    if mint_to:
+        _add_mint_to_as_transfers(txinfo, net_transfers_in)
+
+    net_transfers_in, net_transfers_out, fee = util_sol.detect_fees(transfers_in, transfers_out)
+
+    return (net_transfers_in, net_transfers_out, transfers_unknown), fee
+
+
+
 
 def _get_source_destination(currency, is_transfer_in, transfers_in, transfers_out):
     if is_transfer_in:
@@ -594,6 +719,26 @@ def _get_source_destination(currency, is_transfer_in, transfers_in, transfers_ou
                 return source, destination
 
     raise Exception("Bad condition in _get_source_destination()")
+
+
+def _get_source_destination_new(currency, is_transfer_in, transfers_in, transfers_out):
+    if is_transfer_in:
+        print ("_get_source_destination_new::is_transfer_in\n")
+        for amt, cur, source, destination in transfers_in:
+            print ("_get_source_destination_new::is_transfer_in, cur = ", cur, ", currency=", currency, ", source=", source, ",destination=", destination,"\n")
+            if cur == currency:
+                print ("_get_source_destination_new::currency = ", cur,", source=", source,", destination = ", destination, ", transfers_in\n")
+                return source, destination
+    else:
+        print ("_get_source_destination_new::is_transfer_out\n")
+        for amt, cur, source, destination in transfers_out:
+            print ("_get_source_destination_new::is_transfer_in, cur = ", cur, ", currency=", currency, ", source=", source, ",destination=", destination,"\n")
+            if cur == currency:
+                print ("_get_source_destination_new::currency = ", cur,", source=", source,", destination = ", destination, ", transfers_out\n")
+                return source, destination
+
+    raise Exception("Bad condition in _get_source_destination_new()")
+
 
 
 def _log_messages(txid, data):
