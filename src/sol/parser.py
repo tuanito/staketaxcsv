@@ -686,7 +686,7 @@ def _transfers_net_new(txinfo, transfers, balance_changes_all, mint_to=False):
                     # Do not need to use _get_source_destination() anymore, we just "hard code" the source wallet
                     source = k 
                     print ("_transfers_net_new:: atomic trade found : iter_currency = ", iter_currency,", transfers_out= ", iter_amount, "\n")
-                elif amount > 0:
+                elif iter_amount > 0:
                     # Warning : signs have been inverted from normal convention : the blockchain seems to invert the signs for atomic trades. TO BE VERIFIED 
                     transfers_out=[(iter_amount, iter_currency,k,'')]
                     # Do not need to use _get_source_destination() anymore, we just "hard code" the destination wallet
