@@ -47,6 +47,7 @@ def parse_tx(txid, data, wallet_info):
     timestamp = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if ts else ""
     instructions = data["result"]["transaction"]["message"].get("instructions", [])
 
+    logging.warning("Processing at %s : txid=%s.  ", timestamp, txid)
     txinfo = TxInfoSol(txid, timestamp, "", wallet_address)
 
     txinfo.fee_blockchain = float(result["meta"]["fee"]) / BILLION
@@ -624,7 +625,7 @@ def _transfers_net_new(txinfo, transfers, balance_changes_all, mint_to=False):
     print ("_transfers_net_new::net_amounts.items() : ", net_amounts.items(), "\n")
 
     # Case 1 : we have SOL and one pair of currencies, which means this is a regular trade, not an atomic one 
-    if len ( net_amounts.items()) >= 3: 
+    if len ( net_amounts.items()) >= 3 or len ( net_amounts.items()) == 1:  # len = 1 -> transfers, len >=3 : regular trade, len == 2 : atomic trade
         # Convert dict into two lists of transactions, net_transfers_in and net_transfers_out
         # THIS IS THE PART WHICH is BUGGED for atomic trades : for atomic trades, the balance_changes_wallet gives only one NET value, there is no pair "stSOL/stSOL"... Therefore there is only
         # one net amount which is the P&L, but the "nominal" of the trade does not show, as the cumulated sum makes it fungible. In that case, we need to hack the code and 
@@ -641,7 +642,7 @@ def _transfers_net_new(txinfo, transfers, balance_changes_all, mint_to=False):
             else:
                 continue
     # Case 2 : we have SOL and one currency only, which means this is an atomic trade 
-    elif len ( net_amounts.items()) <= 2: 
+    elif len ( net_amounts.items()) == 2:
         # Pseudo code : 
         # if the net_amount.items() excluding SOL has only element (or including SOL has only 2 elements)
         # this means we have an atomic trade.
@@ -694,6 +695,8 @@ def _transfers_net_new(txinfo, transfers, balance_changes_all, mint_to=False):
                 else:
                     continue
                 # Do not need to use _get_source_destination() anymore, we just "hard code" the wallets
+                # We append one single atomic trade with source and destination (as opposed to 2 trades for, say, BTC/USD)
+                # source, destination = _get_source_destination_new(currency, False, transfers_in, transfers_out)
                 net_transfers_in.append((iter_amount, iter_currency, source, destination))
  
 

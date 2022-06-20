@@ -24,6 +24,7 @@ from sol.progress_sol import SECONDS_PER_STAKING_ADDRESS, SECONDS_PER_TX, Progre
 from sol.TxInfoSol import WalletInfo
 from sol.config_sol import localconfig
 
+DISPLAY_FETCH_INTERVAL = 1 # Interval update of progress reporting (every X transactions)
 LIMIT_PER_QUERY = 1000
 RPC_TIMEOUT = 600  # seconds
 ABSOLUTE_MAX_QUERIES = 100
@@ -35,10 +36,11 @@ def main():
     if txid:
         _read_options(options)
         exporter = txone(wallet_address, txid)
-        exporter.export_print()
+        exporter.export_print() # Print out transaction to the screen
         if export_format != FORMAT_DEFAULT:
             report_util.export_format_for_txid(exporter, export_format, txid)
     else:
+        # exporter contains all the transactions for a given wallet address
         exporter = txhistory(wallet_address, options)
         report_util.run_exports(TICKER_SOL, wallet_address, exporter, export_format)
 
@@ -46,6 +48,7 @@ def main():
 def _read_options(options):
     report_util.read_common_options(localconfig, options)
     localconfig.start_date = options.get("start_date", None)
+    localconfig.end_date = options.get("end_date", None)
     logging.info("localconfig: %s", localconfig.__dict__)
 
 
@@ -110,7 +113,7 @@ def estimate_duration(wallet_address, options):
 
 
 def _num_txids(wallet_address):
-    txids = _query_txids([wallet_address], None)
+    txids = _query_txids([wallet_address], None, None)
     return len(txids)
 
 
@@ -122,6 +125,7 @@ def txhistory(wallet_address, options):
         logging.info("Loaded sol blocks info into cache...")
     logging.info("Using SOLANA_URL=%s...", SOL_NODE)
     min_date = localconfig.start_date
+    max_date = localconfig.end_date
 
     progress = ProgressSol()
     exporter = Exporter(wallet_address, localconfig, TICKER_SOL)
@@ -130,7 +134,7 @@ def txhistory(wallet_address, options):
     # Fetch data to so that job progress can be estimated ##########
 
     # Fetch transaction ids for wallet
-    txids = _txids(wallet_address, progress, min_date)
+    txids = _txids(wallet_address, progress, min_date, max_date)
 
     # Fetch current staking addresses for wallet
     progress.report_message("Fetching staking addresses...")
@@ -149,7 +153,7 @@ def txhistory(wallet_address, options):
     progress.update_estimate(len(wallet_info.get_staking_addresses()))
 
     # Staking rewards data
-    staking_rewards.reward_txs(wallet_info, exporter, progress, min_date)
+    staking_rewards.reward_txs(wallet_info, exporter, progress, min_date, max_date)
 
     ErrorCounter.log(TICKER_SOL, wallet_address)
     if localconfig.cache:
@@ -159,14 +163,14 @@ def txhistory(wallet_address, options):
     return exporter
 
 
-def _query_txids(addresses, progress, min_date=None):
+def _query_txids(addresses, progress, min_date=None, max_date=None):
     """ Returns transactions txid's across all token account addresses """
     max_txs = localconfig.limit
 
     out = []
     txids_seen = set()
     for i, address in enumerate(addresses):
-        if progress and i % 10 == 0:
+        if progress and i % DISPLAY_FETCH_INTERVAL == 0:
             message = f"Fetched txids for {i} of {len(addresses)} addresses..."
             progress.report_message(message)
 
@@ -175,7 +179,8 @@ def _query_txids(addresses, progress, min_date=None):
         for j in range(ABSOLUTE_MAX_QUERIES):
             logging.info("query %s for address=%s", j, address)
 
-            txids, before = RpcAPI.get_txids(address, limit=LIMIT_PER_QUERY, before=before, min_date=min_date)
+            txids, before = RpcAPI.get_txids(address, limit=LIMIT_PER_QUERY, before=before, min_date=min_date, max_date=max_date)
+            logging.info("query_txids min_date=%s max_date=%s len(txids)=%d", min_date, max_date, len(txids))
 
             for txid in txids:
                 # Remove duplicate txids
@@ -193,17 +198,19 @@ def _query_txids(addresses, progress, min_date=None):
 
     # Process oldest first
     out.reverse()
+    print("found tx_ids : \n", out)
+    
     return out
 
 
-def _txids(wallet_address, progress, min_date):
+def _txids(wallet_address, progress, min_date, max_date):
     # Sometimes, transactions do not all appear under main wallet address when querying transaction history.
     # So retrieve token addresses too.
     addresses = [wallet_address]
     token_accounts = RpcAPI.fetch_token_accounts(wallet_address).keys()
     addresses.extend(token_accounts)
 
-    out = _query_txids(addresses, progress, min_date)
+    out = _query_txids(addresses, progress, min_date, max_date)
     return out
 
 
@@ -214,7 +221,7 @@ def _fetch_and_process_txs(txids, wallet_info, exporter, progress):
         elem = RpcAPI.fetch_tx(txid)
         sol.processor.process_tx(wallet_info, exporter, txid, elem)
 
-        if i % 10 == 0:
+        if i % DISPLAY_FETCH_INTERVAL == 0:
             # Update progress to db every so often for user
             message = f"Fetched {i + 1} of {total_count} transactions"
             progress.report(i, message, "txs")

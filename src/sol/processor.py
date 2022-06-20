@@ -9,7 +9,7 @@ from sol.handle_account_misc import (
     is_close_account_tx,
     is_init_account_tx,
 )
-from sol.handle_jupiter import handle_jupiter_aggregator_v2
+from sol.handle_jupiter import handle_jupiter_aggregator_v2, handle_jupiter_aggregator_v2_new
 from sol.handle_marinade import handle_marinade
 from sol.handle_metaplex import handle_metaplex, handle_nft_mint, is_nft_mint
 from sol.handle_nft_market import get_nft_program, handle_nft_exchange
@@ -87,7 +87,8 @@ def process_tx(wallet_info, exporter, txid, data):
 
         # Jupiter Aggregator
         elif co.PROGRAMID_JUPITER_AGGREGATOR_V2 in program_ids:
-            handle_jupiter_aggregator_v2(exporter, txinfo)
+            #handle_jupiter_aggregator_v2(exporter, txinfo)
+            handle_jupiter_aggregator_v2_new(exporter, txinfo)
 
         # Metaplex NFT Candy Machinine program
         elif co.PROGRAMID_METAPLEX_CANDY in program_ids:

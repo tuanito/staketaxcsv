@@ -240,8 +240,9 @@ class RpcAPI(object):
         return dt.replace(tzinfo=timezone.utc).timestamp()
 
     @classmethod
-    def get_txids(cls, wallet_address, limit=None, before=None, min_date=None):
+    def get_txids(cls, wallet_address, limit=None, before=None, min_date=None, max_date=None):
         min_date_ts = cls._unix_timestamp(min_date) if min_date else None
+        max_date_ts = cls._unix_timestamp(max_date) if max_date else None
 
         data = cls._get_txids(wallet_address, limit, before)
 
@@ -259,10 +260,20 @@ class RpcAPI(object):
             txid = info["signature"]
 
             # Restrict to range (min_date, today) if min_date specified
-            if min_date_ts:
+            if min_date_ts and max_date == None:
                 unix_timestamp = info["blockTime"]
                 if unix_timestamp < min_date_ts:
                     return out, None
+            # Restrict to range (min_date, max_date) if min_date and max_date specified
+            elif  min_date_ts and max_date:
+                unix_timestamp = info["blockTime"]
+                if unix_timestamp < min_date_ts or unix_timestamp > max_date_ts:
+                    if data["result"]:
+                        last_txid = data["result"][-1]["signature"]
+                    else:
+                        last_txid = None
+                    return out,last_txid 
+            
 
             out.append(txid)
 

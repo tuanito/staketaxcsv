@@ -13,20 +13,20 @@ DATADIR = os.path.dirname(os.path.realpath(__file__)) + "/data_staking_rewards"
 START_EPOCH = 132  # epoch of first ever staking reward
 
 
-def reward_txs(wallet_info, exporter, progress, min_date):
+def reward_txs(wallet_info, exporter, progress, min_date, max_date):
     """Get reward transactions across all staking addresses for this wallet"""
     staking_addresses = wallet_info.get_staking_addresses()
     wallet_address = wallet_info.wallet_address
 
     for i, addr in enumerate(staking_addresses):
         progress.report(i, f"Fetching rewards for {addr}...", "staking")
-        _reward_txs(wallet_address, exporter, addr, min_date)
+        _reward_txs(wallet_address, exporter, addr, min_date, max_date)
 
 
-def _reward_txs(wallet_address, exporter, staking_address, min_date):
+def _reward_txs(wallet_address, exporter, staking_address, min_date, max_date):
     """Get reward transactions for this staking address"""
     rewards = []
-    for epoch in _reward_txs_epochs(min_date):
+    for epoch in _reward_txs_epochs(min_date, max_date):
         timestamp, reward = _get_reward(epoch, staking_address)
         if not reward:
             continue
@@ -35,6 +35,12 @@ def _reward_txs(wallet_address, exporter, staking_address, min_date):
         date, _ = timestamp.split(" ")
         if min_date and _date(date) < _date(min_date):
             continue
+
+        # Filter out rewards after max_date
+        date, _ = timestamp.split(" ")
+        if max_date and _date(date) > _date(max_date):
+            continue
+
 
         rewards.append([epoch, timestamp, reward])
 
@@ -46,14 +52,18 @@ def _reward_txs(wallet_address, exporter, staking_address, min_date):
     return rewards
 
 
-def _reward_txs_epochs(min_date):
+def _reward_txs_epochs(min_date, max_date):
     """ Returns range of epochs to lookup rewards for """
     end_epoch = RpcAPI.get_latest_epoch()
 
-    if min_date:
+    if min_date and max_date == None:
         # look for epoch guaranteed before/equal this date
         result = EpochFile.newest_epoch_before_date(min_date)
         start_epoch = result if result else START_EPOCH
+    elif min_date and max_date:
+        result = EpochFile.newest_epoch_before_date(min_date)
+        start_epoch = result if result else START_EPOCH
+        end_epoch =  EpochFile.oldest_epoch_after_date(max_date)
     else:
         start_epoch = START_EPOCH
 
@@ -145,6 +155,25 @@ class EpochFile:
             epoch = int(epoch)
 
             if _date(date) <= _date(min_date) and epoch >= newest_epoch:
+                newest_epoch = epoch
+
+        return newest_epoch
+
+    @classmethod
+    def oldest_epoch_after_date(cls, max_date):
+        newest_epoch = 0
+
+        # Get all epoch filenames
+        glob_expr = "{}/epoch.*.csv".format(DATADIR)
+        result = glob.glob(glob_expr)
+        filenames = [os.path.basename(path) for path in result]
+
+        # Find newest epoch with date >= max_date
+        for filename in filenames:
+            _, epoch, date, slot, _ = filename.split(".")
+            epoch = int(epoch)
+
+            if _date(date) >= _date(max_date) and epoch >= newest_epoch:
                 newest_epoch = epoch
 
         return newest_epoch

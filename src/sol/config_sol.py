@@ -6,3 +6,4 @@ class localconfig(config):
     blocks = {}
     limit = 5000  # max txs
     start_date = None
+    end_date = None

@@ -18,6 +18,7 @@ def handle_jupiter_aggregator_v2(exporter, txinfo):
     else:
         handle_unknown_detect_transfers(exporter, txinfo)
 
+# Not used for now
 def handle_jupiter_aggregator_v2_new (exporter, txinfo):
     txinfo.comment = "jupiter_aggregator"
 
@@ -31,10 +32,14 @@ def handle_jupiter_aggregator_v2_new (exporter, txinfo):
         received_amount, received_currency, _, _ = transfers_in[0]
         row = make_swap_tx(txinfo, sent_amount, sent_currency, received_amount, received_currency)
         exporter.ingest_row(row)
-    # else if len(transfers_in) == 1 and len(transfers_out) == 0:
-    #    sent_amount, sent_currency, _, _ = transfers_out[0]
-    #    received_amount, received_currency, _, _ = transfers_in[0]
-    #    row = make_swap_tx(txinfo, sent_amount, sent_currency, received_amount, received_currency)
-    #    exporter.ingest_row(row)
+        print ("TRYING TO EXPORT_PRINT")
+        #exporter.export_print()
+        exporter.export_string_new()
+     #else if len(transfers_in) == 1 and len(transfers_out) == 0:
+     #   sent_amount, sent_currency, _, _ = transfers_out[0]
+     #   sent_amount, sent_currency, _, _ = transfers_in[0]
+     #   received_amount, received_currency, _, _ = transfers_in[0]
+     #   row = make_swap_tx(txinfo, sent_amount, sent_currency, received_amount, received_currency)
+     #   exporter.ingest_row(row)
     else:
         handle_unknown_detect_transfers(exporter, txinfo)

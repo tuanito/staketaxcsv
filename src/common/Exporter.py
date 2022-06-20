@@ -214,6 +214,7 @@ class Exporter:
             comment=row.comment,
         )
 
+    # Prints out transactions to the console
     def export_print(self):
         """ Prints transactions """
         print("Transactions:")
@@ -221,6 +222,15 @@ class Exporter:
 
     def export_string(self):
         table = [et.ROW_FIELDS]
+        table.extend([row.as_array() for row in self.rows])
+        return tabulate(table)
+
+    def export_string_new(self):
+        table = [et.ROW_FIELDS]
+        print ("export_string_new: table=",table)
+        for row in self.rows:
+            print ("export_string_new: row=",row.as_array())
+
         table.extend([row.as_array() for row in self.rows])
         return tabulate(table)
 
