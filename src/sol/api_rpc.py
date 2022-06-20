@@ -11,6 +11,9 @@ from common.debug_util import use_debug_files
 
 TOKEN_ACCOUNTS = {}
 
+# To avoid rate-limiting
+FAST_SLEEP = 0.3
+SLOW_SLEEP = 0.5
 
 class RpcAPI(object):
     session = requests.Session()
@@ -40,9 +43,9 @@ class RpcAPI(object):
 
         if "api.mainnet-beta.solana.com" in SOL_NODE:
             # mainnet: a bit slower to avoid rate-limiting errors
-            time.sleep(0.3)
+            time.sleep(SLOW_SLEEP)
         else:
-            time.sleep(0.1)
+            time.sleep(FAST_SLEEP)
 
         return result
 

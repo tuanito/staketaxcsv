@@ -18,7 +18,6 @@ def handle_jupiter_aggregator_v2(exporter, txinfo):
     else:
         handle_unknown_detect_transfers(exporter, txinfo)
 
-# Not used for now
 def handle_jupiter_aggregator_v2_new (exporter, txinfo):
     txinfo.comment = "jupiter_aggregator"
 

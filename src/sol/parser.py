@@ -625,7 +625,7 @@ def _transfers_net_new(txinfo, transfers, balance_changes_all, mint_to=False):
     print ("_transfers_net_new::net_amounts.items() : ", net_amounts.items(), "\n")
 
     # Case 1 : we have SOL and one pair of currencies, which means this is a regular trade, not an atomic one 
-    if len ( net_amounts.items()) >= 3 or len ( net_amounts.items()) == 1:  # len = 1 -> transfers, len >=3 : regular trade, len == 2 : atomic trade
+    if len ( net_amounts.items()) >= 3 or len ( net_amounts.items()) == 1:  # len = 1 : this is a transfer / len >=3 : regular trade / len == 2 : atomic trade
         # Convert dict into two lists of transactions, net_transfers_in and net_transfers_out
         # THIS IS THE PART WHICH is BUGGED for atomic trades : for atomic trades, the balance_changes_wallet gives only one NET value, there is no pair "stSOL/stSOL"... Therefore there is only
         # one net amount which is the P&L, but the "nominal" of the trade does not show, as the cumulated sum makes it fungible. In that case, we need to hack the code and 

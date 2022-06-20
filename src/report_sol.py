@@ -27,7 +27,7 @@ from sol.config_sol import localconfig
 DISPLAY_FETCH_INTERVAL = 1 # Interval update of progress reporting (every X transactions)
 LIMIT_PER_QUERY = 1000
 RPC_TIMEOUT = 600  # seconds
-ABSOLUTE_MAX_QUERIES = 100
+ABSOLUTE_MAX_QUERIES = 100 # number of queries : if one query = 1 day, 100 means 100 days
 
 
 def main():
